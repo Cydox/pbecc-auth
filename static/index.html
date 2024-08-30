@@ -1,0 +1,155 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>pbecc auth</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f4f4f4;
+        }
+        .container {
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            text-align: center;
+        }
+        input[type="password"] {
+            width: 80%;
+            padding: 10px;
+            margin-bottom: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        button {
+            width: 100%;
+            padding: 10px;
+            margin-top: 10px;
+            border: none;
+            border-radius: 4px;
+            background-color: #007bff;
+            color: white;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+    </style>
+    <!-- Include jQuery -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="/noble-curves.js"></script>
+</head>
+<body>
+
+    <div class="container">
+        <input type="password" id="password" placeholder="Password">
+        <button id="signup">Sign Up</button>
+        <button id="signin">Sign In</button>
+    </div>
+
+    <script>
+	function base64ToBytes(base64) {
+		const binString = atob(base64);
+		return Uint8Array.from(binString, (m) => m.codePointAt(0));
+	}
+
+	function bytesToBase64(bytes) {
+		const binString = Array.from(bytes, (byte) =>
+		String.fromCodePoint(byte),
+		).join("");
+		return btoa(binString);
+	}
+
+        $(document).ready(function() {
+            // Sign Up button click event
+            $("#signup").click(async function() {
+		const password = $("#password").val();
+		const salt = crypto.getRandomValues(new Uint8Array(32));
+
+		const textEncoder = new TextEncoder("utf-8");
+		const passwordBuffer = textEncoder.encode(password);
+		const importedKey = await crypto.subtle.importKey("raw", passwordBuffer, "PBKDF2", false, ["deriveBits"]);
+
+		const saltBuffer = salt;
+		const params = {name: "PBKDF2", hash: "SHA-256", salt: saltBuffer, iterations: 1000000};
+		const derivation = await crypto.subtle.deriveBits(params, importedKey, 256);
+
+		const privateKey = new Uint8Array(derivation);
+		const publicKey = await nobleCurves.ed25519.getPublicKey(privateKey);
+
+		const response = await fetch("/signup", {
+			method: "POST",
+			headers: {
+				'Content-Type': 'application/json'
+			},
+			body: JSON.stringify({
+				salt: bytesToBase64(saltBuffer),
+				publicKey: bytesToBase64(publicKey)
+			})
+		});
+
+		if (response.ok) {
+			alert("Sign up successful!");
+		} else {
+			alert("Sign up failed!");
+		}
+
+            });
+
+            // Sign In button click event
+            $("#signin").click(async function() {
+		const challenge_response = await fetch("/getchallenge",  {
+			method: "POST",
+			headers: {
+				'Content-Type': 'application/json'
+			}
+		})
+		const challenge = await challenge_response.json()
+		const salt = base64ToBytes(challenge.salt)
+
+		const password = $("#password").val();
+		
+		const textEncoder = new TextEncoder("utf-8");
+		const passwordBuffer = textEncoder.encode(password);
+		const importedKey = await crypto.subtle.importKey("raw", passwordBuffer, "PBKDF2", false, ["deriveBits"]);
+
+		const saltBuffer = salt;
+		const params = {name: "PBKDF2", hash: "SHA-256", salt: saltBuffer, iterations: 1000000};
+		const derivation = await crypto.subtle.deriveBits(params, importedKey, 256);
+
+		const privateKey = new Uint8Array(derivation);
+
+		const signature = nobleCurves.ed25519.sign(base64ToBytes(challenge.challenge), privateKey);
+
+		const signin_response = await fetch("/signin", {
+			method: "POST",
+			headers: {
+				'Content-Type': 'application/json'
+			},
+			body: JSON.stringify({
+				challenge: challenge.challenge,
+				signature: bytesToBase64(signature)
+			})
+		});
+
+
+		if (signin_response.ok) {
+                	alert("Login successful!");
+		} else {
+			alert("Login failed!");
+		}
+            });
+        });
+    </script>
+
+</body>
+</html>
